@@ -1,70 +1,174 @@
-{-# LANGUAGE QuasiQuotes, ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes, ScopedTypeVariables, MultiWayIf #-}
 
 module Main where
 
-import Data.Maybe
-import Control.Monad.IO.Class
-
-import Graphics.UI.Gtk
-import Graphics.UI.Gtk.WebKit.Types
-import Graphics.UI.Gtk.WebKit.WebView
-import Graphics.UI.Gtk.WebKit.DOM.MouseEvent
-import Graphics.UI.Gtk.WebKit.DOM.HTMLElement as H
-import Graphics.UI.Gtk.WebKit.DOM.Document
-import Graphics.UI.Gtk.WebKit.DOM.HTMLDocument
-import Graphics.UI.Gtk.WebKit.DOM.EventTarget
-import Graphics.UI.Gtk.WebKit.DOM.EventTargetClosures
+import Graphics.UI.Gtk.WebKit.DOM.Element as E
+import Graphics.UI.Gtk.WebKit.DOM.HTMLInputElement as I
+import Graphics.UI.Gtk.WebKit.DOM.HTMLElement as H hiding (click)
 import QQ
+import Control.Monad.Reader
+import Graphics.UI.Gtk.WebKit.DOM.EventM
 
-fromMaybeM :: Monad m => String -> Maybe a -> m a
-fromMaybeM st = maybe (fail st) return
+
+import Boilerplate
+import Lib
+import Control.Monad.State
+import qualified Data.Set as S
+import Data.Tree
+import Control.Concurrent.MVar
+import Control.Concurrent
+import Dia
+import Data.Maybe
+import Graphics.UI.Gtk (postGUIAsync, postGUISync)
+import Data.Array
+import Data.List
+
+initialContent :: String
+initialContent = [s|
+<!DOCTYPE html>
+<html>
+<head>
+<title>Title of the document</title>
+<style>
+#tree svg {
+  float: right;
+  max-height: 100vh;
+  max-width: 40vw;
+}
+#stack {
+  float: left;
+}
+table {
+  border: 1px solid;
+  border-spacing: 0;
+  min-width: 1em;
+  min-height: 1em;
+}
+table td {
+  border: 1px solid;
+  white-space: pre;
+  text-align: center;
+  padding: 0.5ex;
+}
+#table {
+  margin-left: 3em;
+  margin-top: 2em;
+}
+#input {
+  margin-left: 3em;
+}
+#stack {
+  margin-top: 2em;
+}
+#table td.active {
+  background: green;
+}
+</style>
+</head>
+
+<body>
+<div id="tree"></div>
+<input type="text" id="inputstr">
+<button id="step" disabled>Step</button>
+<button id="run">Run</button>
+<table id="input"></table>
+<table id="stack"></table>
+<table id="table">
+</table>
+<div id="error">
+</div>
+</body>
+
+</html>
+|]
+
+wrap :: [a] -> [a] -> [a] -> [a]
+wrap b e st = b ++ st ++ e
 
 main :: IO ()
-main = do
-  -- initialize Gtk
-  _ <- initGUI
-
-  -- create a new window, a scrolled window, and a new webview
-  w  <- windowNew
-  sw <- scrolledWindowNew Nothing Nothing
-  wv <- webViewNew
-
-  -- set the child of the parent to the scrolled window,
-  -- and set some others attributes
-  set w
-    [ containerChild       := sw
-    , windowDefaultWidth   := 1000
-    , windowDefaultHeight  := 800
-    , containerBorderWidth := 0
-    ]
-  -- set the child of the scrolled windows to the webview.
-  set sw [ containerChild := wv ]
-
-  -- load our HTML string on the webview.
-  webViewLoadString wv [s|
-<div id="abc">
-  <h1>Hello (with click handler)</h1>
-</div>
-<div id="def">
-  <h1>Hello (without handler)</h1>
-</div>
-|] (Just "text/html") ""
-
-  -- on destroying event, we quit the mainloop
-  -- onDestroy w mainQuit
-  w `on` deleteEvent $ liftIO mainQuit >> return False
-  -- show all widgets starting from the root window
-  widgetShowAll w
-
-  -- once the page is loaded, install event handlers as needed
-  wv `on` documentLoadFinished $ \wf -> do
-    doc <- webViewGetDomDocument wv >>= fromMaybeM "no document"
-    abc <- getElementById doc "abc" >>= fromMaybeM "no element id=abc found"
-    evlstn <- eventListenerNew $ \(e :: MouseEvent) -> do
-      x <- getClientX e
-      y <- getClientY e
-      putStrLn $ "evlist called at (" ++ show x ++ ", " ++ show y ++ ")"
-    putStrLn "Installing handler"
-    addEventListener abc "click" (Just evlstn) True
-  -- start GTK main loop
-  mainGUI
+main = mainWidget initialContent $ \doc -> do
+  stepBtn <- getElem doc "step"
+  runBtn <- getElem doc "run"
+  inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
+  stackel <- castToHTMLElement <$> getElem doc "stack"
+  inputel <- castToHTMLElement <$> getElem doc "input"
+  treeel <- getElem doc "tree"
+  tableel <- getElem doc "table"
+  errorel <- castToHTMLElement <$> getElem doc "error"
+  setValue inputstrel . Just $ "id + id"
+  let drawStack v =
+        setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ showSym i++"</td></tr>") v
+      drawInput v =
+        setInnerHTML inputel $ Just $ "<tr>" ++ concatMap (\i -> "<td>"++ showTerm i++"</td>") v ++ "</tr>"
+      updateTree v =
+        setInnerHTML treeel $ Just $ drawSynTree $ head $ v $ repeat $ Node "?" []
+      printError v =
+        setInnerText errorel $ Just v
+      printTable rules v i' j' = do
+        let ((imin, jmin), (imax, jmax)) = bounds v
+            alt = allTerminals rules
+            alnt = allNonTerminals rules
+            h = wrap "<tr>" "</tr>" $ wrap "<th>" "</th>" "" ++ concatMap (wrap "<th>" "</th>" . showTerm) alt
+            t = flip concatMap [imin..imax] $ \i -> wrap "<tr>" "</tr>" $
+                  ((wrap "<th>" "</th>" $ showNT $ S.elemAt i alnt) ++) . flip concatMap [jmin..jmax] $ \j ->
+                    wrap (if i == i' && j==j' then "<td class='active'>" else "<td>") "</td>" $
+                      intercalate "<br>" $ map showRule $ v ! (i,j)
+        setInnerHTML tableel $ Just $ h ++ t
+  canContinue <- newEmptyMVar
+  canRun <- newMVar True
+  void $ (stepBtn `on` click) $ liftIO $ void $ tryPutMVar canContinue ()
+  void $ (runBtn `on` E.click) $ liftIO $ void $ forkIO $ do
+    printError ""
+    postGUIAsync $ do
+      setAttribute runBtn "disabled" ""
+      removeAttribute stepBtn "disabled"
+    canRunVal <- tryTakeMVar canRun
+    when (isJust canRunVal) $ do
+      _ <- tryTakeMVar canContinue
+      Just inputstrText <- postGUISync $ I.getValue inputstrel
+      let inp = map Terminal $ words inputstrText
+          rules = test1
+      if any (`S.notMember` allTerminals rules) inp
+      then
+        printError "Unknown terminal"
+      else do
+        let tbl = makeLL1 rules
+            run = do
+              (stack, input', stl) <- get
+              liftIO $ postGUIAsync $ do
+                drawStack stack
+                drawInput input'
+                updateTree stl
+              if
+                | null stack && null input' -> return ()
+                | null stack -> liftIO (printError "empty stack")
+                | null input' -> liftIO (printError "empty input")
+                | otherwise -> do
+                  (sym', (st,inp')) <- runStateT (stepLL1FA rules tbl) (stack, input')
+                  case sym' of
+                    Right sym -> do
+                      let n =
+                            case sym of
+                              Right (_, (_, r)) -> length r
+                              _ -> 0
+                          c =
+                            case sym of
+                              Left (Terminal term) -> Node term
+                              Left Epsilon -> Node "ε"
+                              Left Eof -> Node "$"
+                              Right (_, (NonTerminal nonTerm, _)) -> Node nonTerm
+                      case sym of
+                        Right ((i, j), _) -> liftIO $ postGUIAsync $ printTable rules tbl i j
+                        _ -> liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+                      _ <- liftIO $ takeMVar canContinue
+                      put (st, inp', stl . uncurry ((:) . c) . splitAt n)
+                      run
+                    Left err -> printError err
+        liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+        evalStateT run ([start], inp ++ [Eof], id)
+      postGUIAsync $ do
+        removeAttribute runBtn "disabled"
+        setAttribute stepBtn "disabled" ""
+      void $ tryPutMVar canRun True
+  where
+    start = SNonTerminal $ NonTerminal "S"

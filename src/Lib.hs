@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE MultiWayIf, FlexibleContexts #-}
 module Lib where
 
 import qualified Data.Set as S
@@ -7,7 +7,6 @@ import Data.Maybe
 import Data.Array
 import Data.List
 import Data.Tree
-import Data.Tree.Pretty
 import Control.Monad.State
 -- import Control.Monad.Trans.State
 -- import Text.Regex.TDFA
@@ -131,9 +130,9 @@ showSym (STerminal t) = showTerm t
 showSym (SNonTerminal t) = showNT t
 
 showRule :: (NonTerminal, [Symbol]) -> String
-showRule (nt, alts) = showNT nt ++ "->" ++ unwords (map showSym alts)
+showRule (nt, alts) = showNT nt ++ " → " ++ unwords (map showSym alts)
 
-stepLL1FA :: Rules -> LL1Table -> StateT ([Symbol], [Terminal]) IO (Either Terminal (NonTerminal, [Symbol]))
+stepLL1FA :: MonadState ([Symbol], [Terminal]) m => Rules -> Array (Int, Int) [(a, [Symbol])] -> m (Either String (Either Terminal ((Int, Int), (a, [Symbol]))))
 stepLL1FA rules tbl = do
   (stack, input) <- get
   let (x:xs) = stack
@@ -143,64 +142,17 @@ stepLL1FA rules tbl = do
       ti = S.findIndex a at
   case x of
     STerminal a' | a == a' -> do
-      lift $ putStrLn $ "Take:\t" ++ showTerm a
       put (xs, as)
-      return $ Left a
+      return $ Right $ Left a
     STerminal Epsilon -> do
-      -- lift $ print x
       put (xs, a:as)
-      return $ Left Epsilon
-    STerminal _ -> do
-      lift $ print $ "fail:" ++ show x
-      fail $ show x
+      return $ Right $ Left Epsilon
+    STerminal t -> return $ Left (showTerm t)
     SNonTerminal nt -> do
       let nti = S.findIndex nt ant
       case tbl ! (nti, ti) of
-        [] -> do
-          lift $ print "fail:empty action"
-          fail "empty action"
+        [] -> return $ Left "empty action"
         [act] -> do
-          lift $ putStrLn $ "Rule:\t" ++ showRule act
           put (snd act ++ xs, a:as)
-          return $ Right act
-        _ -> do
-          lift $ print "fail:ambigous action"
-          fail "ambigous"
-
-runLL1FA :: Rules -> String -> IO ()
-runLL1FA rules input = do
-  let inp = map Terminal $ words input
-  when (any (`S.notMember` allTerminals rules) inp) $ do
-    print "Unknown terminal"
-    fail ""
-  -- putStrLn . drawVerticalForest =<< evalStateT run ([start], inp ++ [Eof])
-  putStrLn . rootLabel . head =<< evalStateT run ([start], inp ++ [Eof])
-  where
-    start = SNonTerminal $ NonTerminal "S"
-    tbl = makeLL1 rules
-    run :: StateT ([Symbol], [Terminal]) IO [SynTree]
-    run = do
-      (stack, input') <- get
-      lift $ putStrLn "STEP:"
-      lift $ putStr "Stack:\t"
-      lift $ putStrLn $ intercalate "; " $ map showSym stack
-      lift $ putStr "Input:\t"
-      lift $ putStrLn $ unwords $ map showTerm input'
-      if
-        | null stack && null input' -> return []
-        | null stack -> do
-          lift $ print input
-          lift $ print "fail:empty stack"
-          fail "empty stack"
-        | null input' -> do
-          lift $ print stack
-          lift $ print "fail:empty input"
-          fail "empty stack"
-        | otherwise -> do
-          sym <- stepLL1FA rules tbl
-          case sym of
-            Left (Terminal term) -> (Node term [] :) <$> run
-            Left Epsilon -> forever (return ()) >> (Node "ε" [] :) <$> run
-            Left Eof -> (Node "$" [] :) <$> run
-            Right (NonTerminal nonTerm, r) ->
-              uncurry ((:) . Node nonTerm) . splitAt (length r) <$> run
+          return $ Right $ Right ((nti,ti), act)
+        _ -> return $ Left "ambigous"
