@@ -1,4 +1,4 @@
-Copyright Author name here (c) 2017
+Copyright Nikolay Yakimov (c) 2017
 
 All rights reserved.
 
@@ -28,3 +28,6 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+app/QQ.hs is (c) 2009 by Audrey Tang and has a slighliy different license, see
+the file itself for details.
