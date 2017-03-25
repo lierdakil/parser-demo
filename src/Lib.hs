@@ -10,6 +10,8 @@ import Control.Monad.State
 import Data.List
 import Parse
 
+setRange :: Ord a => (a, a) -> S.Set a -> S.Set a
+setRange (l, u) = S.filter (\i -> i >= l && i <= u)
 type LL1Table = Array (Int, Int) [(NonTerminal, [Symbol])]
 
 {- first ε = {ε}
@@ -57,37 +59,42 @@ makeLL1 rules = accumArray (++) [] ((0, 0), (S.size nterms - 1, S.size terms - 1
   where
     terms = allTerminals rules
     nterms = allNonTerminals rules
+    nonTermIx x = S.findIndex x nterms
+    termIx x = S.findIndex x terms
     assoc = concatMap (uncurry (concatMap . assocRule)) (M.toList rules)
     assocRule p alpha = concatMap termCell $ S.toList fa
       where
         fa = first rules alpha
         fol = follow rules p
         termCell Epsilon = concatMap termCell $ S.toList fol
-        termCell term = [((S.findIndex p nterms, S.findIndex term terms), [(p, alpha)])]
+        termCell term = [((nonTermIx p, termIx term), [(p, alpha)])]
 
-stepLL1FA :: MonadState ([Symbol], [Terminal]) m => Rules -> Array (Int, Int) [(a, [Symbol])] -> m (Either String (Either Terminal ((Int, Int), (a, [Symbol]))))
+data LL1Action = LL1Error String | LL1Shift Terminal | LL1Prod (Int, Int) (NonTerminal, [Symbol])
+
+stepLL1FA :: MonadState ([Symbol], [Terminal]) m => Rules -> LL1Table -> m LL1Action
 stepLL1FA rules tbl = do
   a <- peek
   x <- pop
-  let ti = S.findIndex a at
   case x of
     STerminal a' | a == a' -> do
       shift
-      return $ Right $ Left a
+      return $ LL1Shift a
     STerminal Epsilon ->
-      return $ Right $ Left Epsilon
-    STerminal t -> return $ Left (showTerm t)
+      return $ LL1Shift Epsilon
+    STerminal t -> return $ LL1Error (showTerm t)
     SNonTerminal nt -> do
-      let nti = S.findIndex nt ant
-      case tbl ! (nti, ti) of
-        [] -> return $ Left "empty action"
+      let ix = (nonTermIx nt, termIx a)
+      case tbl ! ix of
+        [] -> return $ LL1Error "empty action"
         [(p, alpha)] -> do
           push alpha
-          return $ Right $ Right ((nti,ti), (p, alpha))
-        _ -> return $ Left "ambigous"
+          return $ LL1Prod ix (p, alpha)
+        _ -> return $ LL1Error "ambigous"
   where
-    at = allTerminals rules
-    ant = allNonTerminals rules
+    terms = allTerminals rules
+    nterms = allNonTerminals rules
+    nonTermIx x = S.findIndex x nterms
+    termIx x = S.findIndex x terms
 
 showTerm :: Terminal -> String
 showTerm (Terminal s) = s

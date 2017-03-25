@@ -117,7 +117,7 @@ main = mainWidget initialContent $ \doc -> do
         setInnerHTML treeel $ Just $ drawSynTree $ head $ v $ repeat $ Node "?" []
       printError v =
         setInnerText errorel $ Just v
-      printTable rules v i' j' = do
+      printTable rules v (i', j') = do
         let ((imin, jmin), (imax, jmax)) = bounds v
             alt = allTerminals rules
             alnt = allNonTerminals rules
@@ -162,24 +162,21 @@ main = mainWidget initialContent $ \doc -> do
                     | otherwise -> do
                       sym' <- stepLL1FA rules tbl
                       case sym' of
-                        Right sym -> do
-                          let n =
+                        LL1Shift sym -> do
+                          let c =
                                 case sym of
-                                  Right (_, (_, r)) -> length r
-                                  _ -> 0
-                              c =
-                                case sym of
-                                  Left (Terminal term) -> Node term
-                                  Left Epsilon -> Node "ε"
-                                  Left Eof -> Node "$"
-                                  Right (_, (NonTerminal nonTerm, _)) -> Node nonTerm
-                          case sym of
-                            Right ((i, j), _) -> liftIO $ postGUIAsync $ printTable rules tbl i j
-                            _ -> liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+                                  Terminal term -> Node term
+                                  Epsilon -> Node "ε"
+                                  Eof -> Node "$"
+                          liftIO $ postGUIAsync $ printTable rules tbl (-1, -1)
                           _ <- liftIO $ takeMVar canContinue
-                          run $ stl . uncurry ((:) . c) . splitAt n
-                        Left err -> printError err
-            liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+                          run $ stl . (c []:)
+                        LL1Prod ix (NonTerminal p, als) -> do
+                          liftIO $ postGUIAsync $ printTable rules tbl ix
+                          _ <- liftIO $ takeMVar canContinue
+                          run $ stl . uncurry ((:) . Node p) . splitAt (length als)
+                        LL1Error err -> printError err
+            liftIO $ postGUIAsync $ printTable rules tbl (-1, -1)
             evalStateT (run id) ([start], inp ++ [Eof])
       postGUIAsync $ do
         removeAttribute runBtn "disabled"
