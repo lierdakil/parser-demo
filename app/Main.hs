@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, ScopedTypeVariables, MultiWayIf #-}
+{-# LANGUAGE QuasiQuotes, ScopedTypeVariables, MultiWayIf, FlexibleContexts #-}
 
 module Main where
 
@@ -133,8 +133,8 @@ main = mainWidget initialContent $ \doc -> do
         printError "Unknown terminal"
       else do
         let tbl = makeLL1 rules
-            run = do
-              (stack, input', stl) <- get
+            run stl = do
+              (stack, input') <- get
               liftIO $ postGUIAsync $ do
                 drawStack stack
                 drawInput input'
@@ -144,7 +144,7 @@ main = mainWidget initialContent $ \doc -> do
                 | null stack -> liftIO (printError "empty stack")
                 | null input' -> liftIO (printError "empty input")
                 | otherwise -> do
-                  (sym', (st,inp')) <- runStateT (stepLL1FA rules tbl) (stack, input')
+                  sym' <- stepLL1FA rules tbl
                   case sym' of
                     Right sym -> do
                       let n =
@@ -161,11 +161,10 @@ main = mainWidget initialContent $ \doc -> do
                         Right ((i, j), _) -> liftIO $ postGUIAsync $ printTable rules tbl i j
                         _ -> liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
                       _ <- liftIO $ takeMVar canContinue
-                      put (st, inp', stl . uncurry ((:) . c) . splitAt n)
-                      run
+                      run $ stl . uncurry ((:) . c) . splitAt n
                     Left err -> printError err
         liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
-        evalStateT run ([start], inp ++ [Eof], id)
+        evalStateT (run id) ([start], inp ++ [Eof])
       postGUIAsync $ do
         removeAttribute runBtn "disabled"
         setAttribute stepBtn "disabled" ""
