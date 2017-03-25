@@ -24,3 +24,8 @@ drawSynTree t = show $ renderDia SVG options $
              (~~)
              (symmLayout' (with & slHSep .~ (4 :: Float) & slVSep .~ 4) t)
   # centerXY # pad 1.1
+
+drawSynForest :: [Tree String] -> String
+drawSynForest t = show $ renderDia SVG options $
+  foldr ((|||) . (# pad 1.1) . renderTree ((<> circle 1 # fc white) . text) (~~) . symmLayout' (with & slHSep .~ (4 :: Float) & slVSep .~ 4)) mempty t
+  # centerXY # pad 1.1

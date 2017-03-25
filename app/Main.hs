@@ -12,7 +12,8 @@ import Graphics.UI.Gtk.WebKit.DOM.EventM
 
 
 import Boilerplate
-import Lib
+import LL
+import LR
 import Control.Monad.State
 import qualified Data.Set as S
 import Data.Tree
@@ -96,8 +97,8 @@ F -> "(" E ")" | id
 wrap :: [a] -> [a] -> [a] -> [a]
 wrap b e st = b ++ st ++ e
 
-main :: IO ()
-main = mainWidget initialContent $ \doc -> do
+ll :: IO ()
+ll = mainWidget initialContent $ \doc -> do
   stepBtn <- getElem doc "step"
   runBtn <- getElem doc "run"
   inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
@@ -184,3 +185,105 @@ main = mainWidget initialContent $ \doc -> do
       void $ tryPutMVar canRun True
   where
     start = SNonTerminal $ NonTerminal "S"
+
+slr :: IO ()
+slr = mainWidget initialContent $ \doc -> do
+  stepBtn <- getElem doc "step"
+  runBtn <- getElem doc "run"
+  inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
+  stackel <- castToHTMLElement <$> getElem doc "stack"
+  inputel <- castToHTMLElement <$> getElem doc "input"
+  grammarel <- castToHTMLTextAreaElement <$> getElem doc "grammar"
+  treeel <- getElem doc "tree"
+  tableel <- getElem doc "table"
+  errorel <- castToHTMLElement <$> getElem doc "error"
+  I.setValue inputstrel . Just $ "id + id"
+  T.setValue grammarel $ Just initialGrammar
+  let drawStack v =
+        setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ show i++"</td></tr>") v
+      drawInput v =
+        setInnerHTML inputel $ Just $ "<tr>" ++ concatMap (\i -> "<td>"++ showTerm i++"</td>") v ++ "</tr>"
+      updateTree v =
+        setInnerHTML treeel $ Just $ drawSynForest $ reverse v
+      printError v =
+        setInnerText errorel $ Just v
+      printTable rules (action, goto) = do
+        let ((imin, jmin), (imax, jmax)) = bounds action
+            ((imin', jmin'), (imax', jmax')) = bounds goto
+            alt = allTerminals rules
+            alnt = allNonTerminals rules
+            h = wrap "<tr>" "</tr>" $ wrap "<th>" "</th>" "" ++ concatMap (wrap "<th>" "</th>" . showTerm) alt ++ concatMap (wrap "<th>" "</th>" . showNT) alnt
+            t = flip concatMap [imin..imax] $ \i -> wrap "<tr>" "</tr>" $
+                  (((wrap "<th>" "</th>" $ show i) ++) . flip concatMap [jmin..jmax] $ \j ->
+                    wrap "<td>" "</td>" $
+                      showAction $ action ! (i,j))
+                  ++
+                  (flip concatMap [jmin'..jmax'] $ \j ->
+                    wrap "<td>" "</td>" $
+                      maybe "" show $ goto ! (i,j))
+            showAction (LRShift n) = show n
+            showAction (LRReduce x) = showRule x
+            showAction (LRError _) = ""
+            showAction (LRAccept) = "accept"
+        setInnerHTML tableel $ Just $ h ++ t
+  canContinue <- newEmptyMVar
+  canRun <- newMVar True
+  void $ (stepBtn `on` click) $ liftIO $ void $ tryPutMVar canContinue ()
+  void $ (runBtn `on` E.click) $ liftIO $ void $ forkIO $ do
+    printError ""
+    postGUIAsync $ do
+      setAttribute runBtn "disabled" ""
+      removeAttribute stepBtn "disabled"
+    canRunVal <- tryTakeMVar canRun
+    when (isJust canRunVal) $ do
+      _ <- tryTakeMVar canContinue
+      Just grammar <- postGUISync $ T.getValue grammarel
+      case parser grammar of
+        Left err -> postGUIAsync $ printError $ show err
+        Right rules -> do
+          Just inputstrText <- postGUISync $ I.getValue inputstrel
+          let inp = map Terminal $ words inputstrText
+          if any (`S.notMember` allTerminals rules) inp
+          then
+            printError "Unknown terminal"
+          else do
+            let (startSt, action, goto) = makeSLR rules
+                alt = allTerminals rules
+                run stl = do
+                  (stack, input') <- get
+                  liftIO $ postGUIAsync $ do
+                    drawStack stack
+                    drawInput input'
+                    updateTree stl
+                  if
+                    | null stack && null input' -> return ()
+                    | null stack -> liftIO (printError "empty stack")
+                    | otherwise -> do
+                      sym' <- stepLR rules action goto
+                      case sym' of
+                        LRShift _ -> do
+                          let c =
+                                case head input' of
+                                  Terminal term -> Node term
+                                  Epsilon -> Node "ε"
+                                  Eof -> Node "$"
+                          -- liftIO $ postGUIAsync $ printTable rules tbl (-1, -1)
+                          _ <- liftIO $ takeMVar canContinue
+                          run $ c [] : stl
+                        LRReduce (NonTerminal p, als) -> do
+                          -- liftIO $ postGUIAsync $ printTable rules tbl ix
+                          _ <- liftIO $ takeMVar canContinue
+                          let (c, r) = splitAt (length als) stl
+                          run $ Node p (reverse c) : r
+                        LRError err -> printError err
+                        LRAccept -> return ()
+            liftIO $ postGUIAsync $ printTable rules (action, goto)
+            evalStateT (run []) ([startSt], inp ++ [Eof])
+      postGUIAsync $ do
+        removeAttribute runBtn "disabled"
+        setAttribute stepBtn "disabled" ""
+      void $ tryPutMVar canRun True
+  where
+    start = SNonTerminal $ NonTerminal "S"
+
+main = slr

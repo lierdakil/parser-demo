@@ -15,12 +15,13 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lib, Parse
+  exposed-modules:     LL, LR, Parse, QQ
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , array
                      , mtl
                      , parsec
+                     , template-haskell
   ghc-options: -Wall
   default-language:    Haskell2010
 

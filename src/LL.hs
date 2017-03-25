@@ -1,5 +1,5 @@
 {-# LANGUAGE MultiWayIf, FlexibleContexts #-}
-module Lib (module Lib, module Parse) where
+module LL (module LL, module Parse) where
 
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -126,10 +126,10 @@ push xs = do
   (stack, input) <- get
   put (xs ++ stack, input)
 
-peek :: MonadState (a, [t]) m => m t
+peek :: MonadState (a, [Terminal]) m => m Terminal
 peek = do
   (_, input) <- get
-  return $ head input
+  return $ if null input then Eof else head input
 
 shift :: MonadState (a, [t]) m => m ()
 shift = do
