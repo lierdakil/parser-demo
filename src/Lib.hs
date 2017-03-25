@@ -1,5 +1,5 @@
 {-# LANGUAGE MultiWayIf, FlexibleContexts #-}
-module Lib where
+module Lib (module Lib, module Parse) where
 
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -7,10 +7,9 @@ import Data.Maybe
 import Data.Array
 import Control.Monad.State
 
-data Terminal = Terminal String | Epsilon | Eof deriving (Eq, Ord, Show)
-newtype NonTerminal = NonTerminal String deriving (Eq, Ord, Show)
-data Symbol = STerminal Terminal | SNonTerminal NonTerminal deriving (Eq, Ord, Show)
-type Rules = M.Map NonTerminal [[Symbol]]
+import Data.List
+import Parse
+
 type LL1Table = Array (Int, Int) [(NonTerminal, [Symbol])]
 
 {- first ε = {ε}
@@ -90,23 +89,6 @@ stepLL1FA rules tbl = do
     at = allTerminals rules
     ant = allNonTerminals rules
 
-
-test1 :: Rules
-test1 = M.fromList [
-    (nt' "S", [[nt "E", eof]])
-  , (nt' "E", [[nt "T", nt "E'"]])
-  , (nt' "E'", [[t "+", nt "T", nt "E'"], [eps]])
-  , (nt' "T", [[nt "F", nt "T'"]])
-  , (nt' "T'", [[t "*", nt "F", nt "T'"], [eps]])
-  , (nt' "F", [[t "(", nt "E", t ")"], [t "id"]])
-  ]
-  where
-    nt' = NonTerminal
-    nt = SNonTerminal . NonTerminal
-    t = STerminal . Terminal
-    eps = STerminal Epsilon
-    eof = STerminal Eof
-
 showTerm :: Terminal -> String
 showTerm (Terminal s) = s
 showTerm Epsilon = "ε"
@@ -121,6 +103,9 @@ showSym (SNonTerminal t) = showNT t
 
 showRule :: (NonTerminal, [Symbol]) -> String
 showRule (nt, alts) = showNT nt ++ " → " ++ unwords (map showSym alts)
+
+showRules :: (NonTerminal, [[Symbol]]) -> String
+showRules (nt, alts) = showNT nt ++ " → " ++ intercalate "|" (map (unwords . map showSym) alts)
 
 pop :: MonadState ([a], t) m => m a
 pop = do

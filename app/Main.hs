@@ -4,6 +4,7 @@ module Main where
 
 import Graphics.UI.Gtk.WebKit.DOM.Element as E
 import Graphics.UI.Gtk.WebKit.DOM.HTMLInputElement as I
+import Graphics.UI.Gtk.WebKit.DOM.HTMLTextAreaElement as T
 import Graphics.UI.Gtk.WebKit.DOM.HTMLElement as H hiding (click)
 import QQ
 import Control.Monad.Reader
@@ -77,9 +78,19 @@ table td {
 </table>
 <div id="error">
 </div>
+<textarea id="grammar" cols="40" rows="10"></textarea>
 </body>
 
 </html>
+|]
+
+initialGrammar :: String
+initialGrammar = [s|S -> E $
+E -> T E'
+E' -> "+" T E' | ε
+T -> F T'
+T' -> "*" F T' | ε
+F -> "(" E ")" | id
 |]
 
 wrap :: [a] -> [a] -> [a] -> [a]
@@ -92,10 +103,12 @@ main = mainWidget initialContent $ \doc -> do
   inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
   stackel <- castToHTMLElement <$> getElem doc "stack"
   inputel <- castToHTMLElement <$> getElem doc "input"
+  grammarel <- castToHTMLTextAreaElement <$> getElem doc "grammar"
   treeel <- getElem doc "tree"
   tableel <- getElem doc "table"
   errorel <- castToHTMLElement <$> getElem doc "error"
-  setValue inputstrel . Just $ "id + id"
+  I.setValue inputstrel . Just $ "id + id"
+  T.setValue grammarel $ Just initialGrammar
   let drawStack v =
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ showSym i++"</td></tr>") v
       drawInput v =
@@ -125,46 +138,49 @@ main = mainWidget initialContent $ \doc -> do
     canRunVal <- tryTakeMVar canRun
     when (isJust canRunVal) $ do
       _ <- tryTakeMVar canContinue
-      Just inputstrText <- postGUISync $ I.getValue inputstrel
-      let inp = map Terminal $ words inputstrText
-          rules = test1
-      if any (`S.notMember` allTerminals rules) inp
-      then
-        printError "Unknown terminal"
-      else do
-        let tbl = makeLL1 rules
-            run stl = do
-              (stack, input') <- get
-              liftIO $ postGUIAsync $ do
-                drawStack stack
-                drawInput input'
-                updateTree stl
-              if
-                | null stack && null input' -> return ()
-                | null stack -> liftIO (printError "empty stack")
-                | null input' -> liftIO (printError "empty input")
-                | otherwise -> do
-                  sym' <- stepLL1FA rules tbl
-                  case sym' of
-                    Right sym -> do
-                      let n =
-                            case sym of
-                              Right (_, (_, r)) -> length r
-                              _ -> 0
-                          c =
-                            case sym of
-                              Left (Terminal term) -> Node term
-                              Left Epsilon -> Node "ε"
-                              Left Eof -> Node "$"
-                              Right (_, (NonTerminal nonTerm, _)) -> Node nonTerm
-                      case sym of
-                        Right ((i, j), _) -> liftIO $ postGUIAsync $ printTable rules tbl i j
-                        _ -> liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
-                      _ <- liftIO $ takeMVar canContinue
-                      run $ stl . uncurry ((:) . c) . splitAt n
-                    Left err -> printError err
-        liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
-        evalStateT (run id) ([start], inp ++ [Eof])
+      Just grammar <- postGUISync $ T.getValue grammarel
+      case parser grammar of
+        Left err -> postGUIAsync $ printError $ show err
+        Right rules -> do
+          Just inputstrText <- postGUISync $ I.getValue inputstrel
+          let inp = map Terminal $ words inputstrText
+          if any (`S.notMember` allTerminals rules) inp
+          then
+            printError "Unknown terminal"
+          else do
+            let tbl = makeLL1 rules
+                run stl = do
+                  (stack, input') <- get
+                  liftIO $ postGUIAsync $ do
+                    drawStack stack
+                    drawInput input'
+                    updateTree stl
+                  if
+                    | null stack && null input' -> return ()
+                    | null stack -> liftIO (printError "empty stack")
+                    | null input' -> liftIO (printError "empty input")
+                    | otherwise -> do
+                      sym' <- stepLL1FA rules tbl
+                      case sym' of
+                        Right sym -> do
+                          let n =
+                                case sym of
+                                  Right (_, (_, r)) -> length r
+                                  _ -> 0
+                              c =
+                                case sym of
+                                  Left (Terminal term) -> Node term
+                                  Left Epsilon -> Node "ε"
+                                  Left Eof -> Node "$"
+                                  Right (_, (NonTerminal nonTerm, _)) -> Node nonTerm
+                          case sym of
+                            Right ((i, j), _) -> liftIO $ postGUIAsync $ printTable rules tbl i j
+                            _ -> liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+                          _ <- liftIO $ takeMVar canContinue
+                          run $ stl . uncurry ((:) . c) . splitAt n
+                        Left err -> printError err
+            liftIO $ postGUIAsync $ printTable rules tbl (-1) (-1)
+            evalStateT (run id) ([start], inp ++ [Eof])
       postGUIAsync $ do
         removeAttribute runBtn "disabled"
         setAttribute stepBtn "disabled" ""
