@@ -87,12 +87,23 @@ table td {
 
 initialGrammar :: String
 initialGrammar = [s|S -> E $
-E -> T E'
-E' -> "+" T E' | ε
-T -> F T'
-T' -> "*" F T' | ε
+E -> E "+" T | T
+T -> T "*" F | F
 F -> "(" E ")" | id
 |]
+-- initialGrammar :: String
+-- initialGrammar = [s|S -> L "+" R | R
+-- L -> "*" R | id
+-- R -> L
+-- |]
+-- initialGrammar :: String
+-- initialGrammar = [s|S -> E $
+-- E -> T E'
+-- E' -> "+" T E' | ε
+-- T -> F T'
+-- T' -> "*" F T' | ε
+-- F -> "(" E ")" | id
+-- |]
 
 wrap :: [a] -> [a] -> [a] -> [a]
 wrap b e st = b ++ st ++ e
@@ -216,7 +227,7 @@ slr = mainWidget initialContent $ \doc -> do
             t = flip concatMap [imin..imax] $ \i -> wrap "<tr>" "</tr>" $
                   (((wrap "<th>" "</th>" $ show i) ++) . flip concatMap [jmin..jmax] $ \j ->
                     wrap "<td>" "</td>" $
-                      showAction $ action ! (i,j))
+                      intercalate "<br>" $ map showAction $ action ! (i,j))
                   ++
                   (flip concatMap [jmin'..jmax'] $ \j ->
                     wrap "<td>" "</td>" $
@@ -261,7 +272,7 @@ slr = mainWidget initialContent $ \doc -> do
                     | otherwise -> do
                       sym' <- stepLR rules action goto
                       case sym' of
-                        LRShift _ -> do
+                        [LRShift _] -> do
                           let c =
                                 case head input' of
                                   Terminal term -> Node term
@@ -270,13 +281,13 @@ slr = mainWidget initialContent $ \doc -> do
                           -- liftIO $ postGUIAsync $ printTable rules tbl (-1, -1)
                           _ <- liftIO $ takeMVar canContinue
                           run $ c [] : stl
-                        LRReduce (NonTerminal p, als) -> do
+                        [LRReduce (NonTerminal p, als)] -> do
                           -- liftIO $ postGUIAsync $ printTable rules tbl ix
                           _ <- liftIO $ takeMVar canContinue
                           let (c, r) = splitAt (length als) stl
                           run $ Node p (reverse c) : r
-                        LRError err -> printError err
-                        LRAccept -> return ()
+                        [] -> printError "empty action"
+                        _ ->  printError "ambiguous action"
             liftIO $ postGUIAsync $ printTable rules (action, goto)
             evalStateT (run []) ([startSt], inp ++ [Eof])
       postGUIAsync $ do

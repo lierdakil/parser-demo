@@ -37,18 +37,20 @@ first rules (SNonTerminal x:xs)
 -}
 follow :: Rules -> NonTerminal -> S.Set Terminal
 follow _rules (NonTerminal "S") = S.singleton Eof
-follow rules nt = S.unions $ concatMap (uncurry $ map . fol) els
+follow rules nt'' = run S.empty nt''
   where
     els = M.toList rules
-    fol _p [] = S.empty
-    fol p (SNonTerminal nt':xs)
-      | nt == nt' =
-           if S.member Epsilon fxs && p /= nt'
-           then S.delete Epsilon fxs `S.union` follow rules p
-           else S.delete Epsilon fxs
+    run seen nt = S.unions $ concatMap (uncurry $ map . fol) els
       where
-        fxs = first rules xs
-    fol p (_:xs) = fol p xs
+      fol _p [] = S.empty
+      fol p (SNonTerminal nt':xs)
+        | nt == nt' =
+             if S.member Epsilon fxs && S.notMember p seen
+             then S.delete Epsilon fxs `S.union` run (S.insert p seen) p
+             else S.delete Epsilon fxs
+        where
+          fxs = first rules xs
+      fol p (_:xs) = fol p xs
 
 {-  table LL[A, a] where A is production rule head and a is a terminal (not ε),
     if ∀ A -> α, a ∈ first α, then A -> α ∈ LL[A, a]
@@ -137,7 +139,7 @@ shift = do
   put (stack, tail input)
 
 allTerminals :: Rules -> S.Set Terminal
-allTerminals r = S.fromList $ concatMap terms' $ M.elems r
+allTerminals r = S.fromList $ Eof : concatMap terms' (M.elems r)
   where
     terms' = concatMap terms
     terms [] = []

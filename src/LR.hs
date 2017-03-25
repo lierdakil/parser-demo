@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiWayIf, FlexibleContexts, QuasiQuotes #-}
+{-# LANGUAGE MultiWayIf, FlexibleContexts, QuasiQuotes, BangPatterns #-}
 module LR where
 
 import qualified Data.Set as S
@@ -11,23 +11,16 @@ import Data.List
 import Parse
 import LL
 import QQ
+import Debug.Trace
 
 data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) | LRAccept | LRError String deriving (Show)
-type LRActionTable = Array (Int, Int) LRAction
+type LRActionTable = Array (Int, Int) [LRAction]
 type LRGotoTable = Array (Int, Int) (Maybe Int)
 data Point = Point { pHead :: NonTerminal, pPos :: Int, pLookahead :: S.Set Terminal, pBody :: [Symbol] } deriving (Eq, Ord, Show)
 
 (!!!) :: [a] -> Int -> Maybe a
 a !!! b | b < length a = Just $ a !! b
         | otherwise = Nothing
-
-
-rules :: Rules
-rules = let Right gr = parser [s|S -> E $
-E -> E "+" T | T
-T -> T "*" F | F
-F -> "(" E ")" | id
-|] in gr
 
 closure :: Rules -> S.Set Point -> S.Set Point
 closure rules i =
@@ -75,26 +68,31 @@ states rules cl = (S.findIndex start res, res)
       newAcc = S.insert st $ newSt `S.union` acc
       next = S.unions $ map (go newAcc) $ S.toList newSt
 
-test1 = states rules closure
-
 makeSLR :: Rules -> (Int, LRActionTable, LRGotoTable)
-makeSLR rules = (startSt, array bs $ map (ap (,) action) $ range bs, array bs2 $ map (ap (,) goto') $ range bs2)
+makeSLR rules = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ range bs, array bs2 $ map (ap (,) goto') $ range bs2)
   where
     (startSt, stl) = states rules closure
     at = allTerminals rules
     ant = allNonTerminals rules
     bs = ((0, 0), (S.size stl - 1, S.size at - 1))
     bs2 = ((0, 0), (S.size stl - 1, S.size ant - 1))
-    action (st, term)
+    action x = action1 x ++ action2 x
+    action1 (st, term)
       | gt <- goto rules closure curst (STerminal curterm)
       , not $ S.null gt
-      = LRShift $ S.findIndex gt stl
+      = [LRShift $ S.findIndex gt stl]
+      | otherwise
+      = []
+      where
+        curst = S.elemAt st stl
+        curterm = S.elemAt term at
+    action2 (st, term)
       | ss <- S.filter (\(Point h p _ b) -> isNothing (b !!! p) && curterm `S.member` follow rules h) curst
       , not $ S.null ss
       = let e = S.elemAt 0 ss
-        in LRReduce (pHead e, pBody e)
+        in [LRReduce (pHead e, pBody e)]
       | otherwise
-      = LRError "?"
+      = []
       where
         curst = S.elemAt st stl
         curterm = S.elemAt term at
@@ -119,15 +117,15 @@ popn n = do
   (stack, input) <- get
   put (drop n stack, input)
 
-stepLR :: MonadState ([Int], [Terminal]) m => Rules -> LRActionTable -> LRGotoTable -> m LRAction
+stepLR :: MonadState ([Int], [Terminal]) m => Rules -> LRActionTable -> LRGotoTable -> m [LRAction]
 stepLR rules action gotot = do
   a <- peek
   x <- peekstack
   case action ! (x, termIx a) of
-    LRShift n -> do
+    [LRShift n] -> do
       push [n]
       shift
-    LRReduce (nt, b) -> do
+    [LRReduce (nt, b)] -> do
       popn $ length b
       t <- peekstack
       when (nt /= NonTerminal "S") $ do
