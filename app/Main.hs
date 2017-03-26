@@ -25,6 +25,7 @@ import Data.Maybe
 import Graphics.UI.Gtk (postGUIAsync, postGUISync)
 import Data.Array
 import Data.List
+import Control.Arrow
 
 initialContent :: String
 initialContent = [s|
@@ -135,19 +136,21 @@ main = mainWidget initialContent $ \doc -> do
         setInnerHTML treeel $ Just $ drawSynForest $ reverse v
       printError v =
         setInnerText errorel $ Just v
-      printLRTable rules (action, goto') = do
+      printLRTable rules (action, goto') stcs stnt = do
         let ((imin, jmin), (imax, jmax)) = bounds action
             ((_, jmin'), (_, jmax')) = bounds goto'
             alt = allTerminals rules
             alnt = allNonTerminals rules
+            (i', j') = fromMaybe (-1, -1) stcs
+            (i'', j'') = fromMaybe (-1, -1) stnt
             h = wrap "<tr>" "</tr>" $ wrap "<th>" "</th>" "" ++ concatMap (wrap "<th>" "</th>" . showTerm) alt ++ concatMap (wrap "<th>" "</th>" . showNT) alnt
             t = flip concatMap [imin..imax] $ \i -> wrap "<tr>" "</tr>" $
                   (((wrap "<th>" "</th>" $ show i) ++) . flip concatMap [jmin..jmax] $ \j ->
-                    wrap "<td>" "</td>" $
+                    wrap (if i == i' && j==j' then "<td class='active'>" else "<td>") "</td>" $
                       intercalate "<br>" $ map showAction $ action ! (i,j))
                   ++
                   concatMap (\j ->
-                    wrap "<td>" "</td>" $
+                    wrap (if i == i'' && j==j'' then "<td class='active'>" else "<td>") "</td>" $
                       maybe "" show $ goto' ! (i,j))
                     [jmin'..jmax']
             showAction (LRShift n) = show n
@@ -188,6 +191,8 @@ main = mainWidget initialContent $ \doc -> do
           else do
             let runLR tbl = do
                   let (startSt, action, goto') = tbl rules--makeSLR rules
+                      alt = allTerminals rules
+                      alnt = allNonTerminals rules
                       run stl = do
                         (stack, input') <- get
                         liftIO $ postGUIAsync $ do
@@ -206,21 +211,25 @@ main = mainWidget initialContent $ \doc -> do
                                         Terminal term -> (Node term [] :)
                                         Epsilon -> (Node "" [] :)
                                         Eof -> id
-                                -- liftIO $ postGUIAsync $ printTable rules tbl (-1, -1)
+                                liftIO $ postGUIAsync $ printLRTable rules (action, goto')
+                                  (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
+                                  Nothing
                                 _ <- liftIO $ takeMVar canContinue
                                 run $ c stl
-                              [LRReduce (NonTerminal p, als)] -> do
-                                -- liftIO $ postGUIAsync $ printTable rules tbl ix
+                              [LRReduce (np@(NonTerminal p), als)] -> do
+                                (_:ns:_, _) <- get
+                                liftIO $ postGUIAsync $ printLRTable rules (action, goto')
+                                  (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
+                                  (Just (ns, S.findIndex np alnt))
                                 _ <- liftIO $ takeMVar canContinue
                                 let (c, r) = splitAt (length als) stl
                                 run $ Node p (reverse c) : r
                               [LRReduce (StartRule, _)] -> do
-                                -- liftIO $ postGUIAsync $ printTable rules tbl ix
                                 _ <- liftIO $ takeMVar canContinue
                                 return ()
                               [] -> printError "empty action"
                               _:_:_ ->  printError "ambiguous action"
-                  liftIO $ postGUIAsync $ printLRTable rules (action, goto')
+                  liftIO $ postGUIAsync $ printLRTable rules (action, goto') Nothing Nothing
                   evalStateT (run []) ([startSt], inp ++ [Eof])
                 runLL = do
                   let tbl = makeLL1 rules
