@@ -36,7 +36,7 @@ first rules (SNonTerminal x:xs)
         | otherwise = first β \ {ε}
 -}
 follow :: Rules -> NonTerminal -> S.Set Terminal
-follow _rules (NonTerminal "S") = S.singleton Eof
+follow _rules StartRule = S.singleton Eof
 follow rules nt'' = run S.empty nt''
   where
     els = M.toList rules
@@ -105,6 +105,7 @@ showTerm Eof = "$"
 
 showNT :: NonTerminal -> String
 showNT (NonTerminal s) = s
+showNT (StartRule) = "Start"
 
 showSym :: Symbol -> String
 showSym (STerminal t) = showTerm t
