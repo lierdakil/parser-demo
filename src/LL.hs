@@ -20,14 +20,17 @@ type LL1Table = Array (Int, Int) [(NonTerminal, [Symbol])]
             | T is nonterminal and ε ∉ ∪ ∀ T -> β. first β = ∪ ∀ T -> β. first β
 -}
 first :: Rules -> [Symbol] -> S.Set Terminal
-first _rules [] = S.singleton Epsilon
-first _rules (STerminal x:_) = S.singleton x
-first rules (SNonTerminal x:xs)
-  | Epsilon `S.member` fx = S.delete Epsilon fx `S.union` first rules xs
-  | otherwise = fx
+first rules = run S.empty
   where
-    fx = S.unions $ map (first rules) $ fromMaybe [] pr
-    pr = M.lookup x rules
+    run seen sym | sym `S.member` seen = S.empty
+    run _ [] = S.singleton Epsilon
+    run _ (STerminal x:_) = S.singleton x
+    run seen sym@(SNonTerminal x:xs)
+      | Epsilon `S.member` fx = S.delete Epsilon fx `S.union` run (S.insert sym seen) xs
+      | otherwise = fx
+      where
+        fx = S.unions $ map (run (S.insert sym seen)) $ fromMaybe [] pr
+        pr = M.lookup x rules
 
 {- "S" is a start rule by convention.
     follow S = EOF
@@ -91,7 +94,7 @@ stepLL1FA rules tbl = do
         [(p, alpha)] -> do
           push alpha
           return $ LL1Prod ix (p, alpha)
-        _ -> return $ LL1Error "ambigous"
+        _ -> return $ LL1Error "ambiguous"
   where
     terms = allTerminals rules
     nterms = allNonTerminals rules
