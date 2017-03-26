@@ -74,8 +74,9 @@ table td {
 <input type="text" id="inputstr">
 <select id="select">
 <option selected value="LL1">LL(1)</option>
-<option value="LR1">LR(1)</option>
 <option value="SLR">SLR</option>
+<option value="LR1">LR(1)</option>
+<option value="LALR">LALR</option>
 </select>
 <button id="step" disabled>Step</button>
 <button id="run">Run</button>
@@ -91,11 +92,21 @@ table td {
 </html>
 |]
 
-initialGrammar :: String
-initialGrammar = [s|E -> E "+" T | T
-T -> T "*" F | F
-F -> "(" E ")" | id
+initialGrammar :: (String, String)
+initialGrammar = (,) "id = * id = * id" [s|S -> L "=" R | R
+L -> "*" R | id
+R -> L
 |]
+-- initialGrammar :: (String, String)
+-- initialGrammar = (,) "b c d" [s|S -> a A d | b B d | a B e | b A e
+-- A -> c
+-- B -> c
+-- |]
+-- initialGrammar :: String
+-- initialGrammar = [s|E -> E "+" T | T
+-- T -> T "*" F | F
+-- F -> "(" E ")" | id
+-- |]
 -- initialGrammar :: String
 -- initialGrammar = [s|S -> L "+" R | R
 -- L -> "*" R | id
@@ -124,8 +135,9 @@ main = mainWidget initialContent $ \doc -> do
   tableel <- getElem doc "table"
   errorel <- castToHTMLElement <$> getElem doc "error"
   selectel <- castToHTMLSelectElement <$> getElem doc "select"
-  I.setValue inputstrel . Just $ "id + id"
-  T.setValue grammarel $ Just initialGrammar
+  let (initin, initgr) = initialGrammar
+  I.setValue inputstrel . Just $ initin
+  T.setValue grammarel $ Just initgr
   let drawStack how v = liftIO $ postGUIAsync $
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ how i++"</td></tr>") v
       drawInput v = liftIO $ postGUIAsync $
@@ -275,6 +287,7 @@ main = mainWidget initialContent $ \doc -> do
               "LL1" -> runLL
               "LR1" -> runLR makeLR1
               "SLR" -> runLR makeSLR
+              "LALR" -> runLR makeLALR
               x -> printError $ "Unknown: " ++ x
       enableRun
       void $ tryPutMVar canRun True
