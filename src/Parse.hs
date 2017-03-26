@@ -12,7 +12,7 @@ type Rules = M.Map NonTerminal [[Symbol]]
 parser :: String -> Either ParseError Rules
 parser = parse rules "input"
   where
-  rules = spaces *> (M.fromList . addStart <$> endBy rule eol) <* (spaces >> eof)
+  rules = spaces *> (M.fromListWith (++) . addStart <$> endBy rule eol) <* (spaces >> eof)
   rule = do
     spaces'
     name <- nonTerminal
