@@ -10,7 +10,7 @@ import Control.Monad.State
 import Parse
 import LL
 
-data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) deriving (Show)
+data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) deriving (Eq, Ord, Show)
 type LRActionTable = Array (Int, Int) [LRAction]
 type LRGotoTable = Array (Int, Int) (Maybe Int)
 data Point = Point { pHead :: NonTerminal, pPos :: Int, pLookahead :: S.Set Terminal, pBody :: [Symbol] } deriving (Eq, Ord, Show)
@@ -87,8 +87,8 @@ makeLR cl fol rules = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ ra
         curst = S.elemAt st stl
         curterm = S.elemAt term at
     action2 (st, term)
-      = map (\e -> LRReduce (pHead e, pBody e)) $
-          S.toList $ S.filter (\x@(Point _ p _ b) -> isNothing (b !!! p) && fol curst curterm x) curst
+      = S.toList $ S.map (\e -> LRReduce (pHead e, pBody e)) $
+          S.filter (\x@(Point _ p _ b) -> isNothing (b !!! p) && fol curst curterm x) curst
       where
         curst = S.elemAt st stl
         curterm = S.elemAt term at
@@ -101,6 +101,9 @@ makeLR cl fol rules = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ ra
       where
         curst = S.elemAt st stl
         cursym = S.elemAt nt ant
+
+makeLR0 :: Rules -> (Int, LRActionTable, LRGotoTable)
+makeLR0 = makeLR closure (\_ _ _ -> True)
 
 makeSLR :: Rules -> (Int, LRActionTable, LRGotoTable)
 makeSLR rules = makeLR closure (\_ curterm p -> curterm `S.member` follow rules (pHead p)) rules

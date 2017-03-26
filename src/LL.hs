@@ -108,7 +108,7 @@ showTerm Eof = "$"
 
 showNT :: NonTerminal -> String
 showNT (NonTerminal s) = s
-showNT (StartRule) = "Start"
+showNT StartRule = "%S"
 
 showSym :: Symbol -> String
 showSym (STerminal t) = showTerm t

@@ -2,10 +2,13 @@
 
 module Main where
 
+import Graphics.UI.Gtk.WebKit.DOM.Document as D hiding (click)
 import Graphics.UI.Gtk.WebKit.DOM.Element as E
+import Graphics.UI.Gtk.WebKit.DOM.Node as N
 import Graphics.UI.Gtk.WebKit.DOM.HTMLInputElement as I
 import Graphics.UI.Gtk.WebKit.DOM.HTMLTextAreaElement as T
 import Graphics.UI.Gtk.WebKit.DOM.HTMLSelectElement as S
+import Graphics.UI.Gtk.WebKit.DOM.HTMLOptionElement as O
 import Graphics.UI.Gtk.WebKit.DOM.HTMLElement as H hiding (click)
 import QQ
 import Control.Monad.Reader
@@ -57,6 +60,15 @@ table td {
   margin-left: 3em;
   margin-top: 2em;
 }
+textarea {
+  margin-left: 3em;
+  display: block;
+}
+#sample {
+  display: block;
+  margin-top: 2em;
+  margin-left: 3em;
+}
 #input {
   margin-left: 3em;
 }
@@ -74,6 +86,7 @@ table td {
 <input type="text" id="inputstr">
 <select id="select">
 <option selected value="LL1">LL(1)</option>
+<option value="LR0">LR(0)</option>
 <option value="SLR">SLR</option>
 <option value="LR1">LR(1)</option>
 <option value="LALR">LALR</option>
@@ -86,39 +99,34 @@ table td {
 </table>
 <div id="error">
 </div>
+<select id="sample"></select>
 <textarea id="grammar" cols="40" rows="10"></textarea>
 </body>
 
 </html>
 |]
 
-initialGrammar :: (String, String)
-initialGrammar = (,) "id = * id = * id" [s|S -> L "=" R | R
+samples :: [(String, String)]
+samples = [
+    (,) "id = * id" [s|S -> L "=" R | R
 L -> "*" R | id
 R -> L
 |]
--- initialGrammar :: (String, String)
--- initialGrammar = (,) "b c d" [s|S -> a A d | b B d | a B e | b A e
--- A -> c
--- B -> c
--- |]
--- initialGrammar :: String
--- initialGrammar = [s|E -> E "+" T | T
--- T -> T "*" F | F
--- F -> "(" E ")" | id
--- |]
--- initialGrammar :: String
--- initialGrammar = [s|S -> L "+" R | R
--- L -> "*" R | id
--- R -> L
--- |]
--- initialGrammar :: String
--- initialGrammar = [s|E -> T E'
--- E' -> "+" T E' |
--- T -> F T'
--- T' -> "*" F T' |
--- F -> "(" E ")" | id
--- |]
+  , (,) "b c d" [s|S -> a A d | b B d | a B e | b A e
+A -> c
+B -> c
+|]
+  , (,) "id + ( id + id ) * id" [s|E -> E "+" T | T
+T -> T "*" F | F
+F -> "(" E ")" | id
+|]
+  , (,) "id + ( id + id ) * id" [s|E -> T E'
+E' -> "+" T E' |
+T -> F T'
+T' -> "*" F T' |
+F -> "(" E ")" | id
+|]
+  ]
 
 wrap :: [a] -> [a] -> [a] -> [a]
 wrap b e st = b ++ st ++ e
@@ -135,9 +143,20 @@ main = mainWidget initialContent $ \doc -> do
   tableel <- getElem doc "table"
   errorel <- castToHTMLElement <$> getElem doc "error"
   selectel <- castToHTMLSelectElement <$> getElem doc "select"
-  let (initin, initgr) = initialGrammar
+  sampleel <- castToHTMLSelectElement <$> getElem doc "sample"
+  forM_ [0 .. length samples - 1] $ \i -> do
+    Just opt <- fmap castToHTMLOptionElement <$> D.createElement doc (Just "option")
+    H.setInnerText opt (Just $ "Example " ++ show i)
+    O.setValue opt $ show i
+    appendChild sampleel (Just opt)
+  let (initin, initgr) = head samples
   I.setValue inputstrel . Just $ initin
   T.setValue grammarel $ Just initgr
+  void $ (sampleel `on` E.change) $ liftIO $ do
+    n <- S.getSelectedIndex sampleel
+    let (initin, initgr) = samples !! n
+    I.setValue inputstrel . Just $ initin
+    T.setValue grammarel $ Just initgr
   let drawStack how v = liftIO $ postGUIAsync $
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ how i++"</td></tr>") v
       drawInput v = liftIO $ postGUIAsync $
@@ -286,6 +305,7 @@ main = mainWidget initialContent $ \doc -> do
             case act of
               "LL1" -> runLL
               "LR1" -> runLR makeLR1
+              "LR0" -> runLR makeLR0
               "SLR" -> runLR makeSLR
               "LALR" -> runLR makeLALR
               x -> printError $ "Unknown: " ++ x
