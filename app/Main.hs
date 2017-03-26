@@ -25,7 +25,6 @@ import Data.Maybe
 import Graphics.UI.Gtk (postGUIAsync, postGUISync)
 import Data.Array
 import Data.List
-import Control.Arrow
 
 initialContent :: String
 initialContent = [s|
@@ -92,24 +91,23 @@ table td {
 </html>
 |]
 
--- initialGrammar :: String
--- initialGrammar = [s|S -> E $
--- E -> E "+" T | T
--- T -> T "*" F | F
--- F -> "(" E ")" | id
--- |]
+initialGrammar :: String
+initialGrammar = [s|E -> E "+" T | T
+T -> T "*" F | F
+F -> "(" E ")" | id
+|]
 -- initialGrammar :: String
 -- initialGrammar = [s|S -> L "+" R | R
 -- L -> "*" R | id
 -- R -> L
 -- |]
-initialGrammar :: String
-initialGrammar = [s|E -> T E'
-E' -> "+" T E' |
-T -> F T'
-T' -> "*" F T' |
-F -> "(" E ")" | id
-|]
+-- initialGrammar :: String
+-- initialGrammar = [s|E -> T E'
+-- E' -> "+" T E' |
+-- T -> F T'
+-- T' -> "*" F T' |
+-- F -> "(" E ")" | id
+-- |]
 
 wrap :: [a] -> [a] -> [a] -> [a]
 wrap b e st = b ++ st ++ e
@@ -128,15 +126,15 @@ main = mainWidget initialContent $ \doc -> do
   selectel <- castToHTMLSelectElement <$> getElem doc "select"
   I.setValue inputstrel . Just $ "id + id"
   T.setValue grammarel $ Just initialGrammar
-  let drawStack how v =
+  let drawStack how v = liftIO $ postGUIAsync $
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ how i++"</td></tr>") v
-      drawInput v =
+      drawInput v = liftIO $ postGUIAsync $
         setInnerHTML inputel $ Just $ "<tr>" ++ concatMap (\i -> "<td>"++ showTerm i++"</td>") v ++ "</tr>"
-      updateLRTree v =
+      updateLRTree v = liftIO $ postGUIAsync $
         setInnerHTML treeel $ Just $ drawSynForest $ reverse v
-      printError v =
+      printError v = liftIO $ postGUIAsync $
         setInnerText errorel $ Just v
-      printLRTable rules (action, goto') stcs stnt = do
+      printLRTable rules (action, goto') stcs stnt =  liftIO $ postGUIAsync $ do
         let ((imin, jmin), (imax, jmax)) = bounds action
             ((_, jmin'), (_, jmax')) = bounds goto'
             alt = allTerminals rules
@@ -156,9 +154,9 @@ main = mainWidget initialContent $ \doc -> do
             showAction (LRShift n) = show n
             showAction (LRReduce x) = showRule x
         setInnerHTML tableel $ Just $ h ++ t
-      updateLLTree v =
+      updateLLTree v = liftIO $ postGUIAsync $
         setInnerHTML treeel $ Just $ drawSynTree $ head $ v $ repeat $ Node "?" []
-      printLLTable rules v (i', j') = do
+      printLLTable rules v (i', j') = liftIO $ postGUIAsync $ do
         let ((imin, jmin), (imax, jmax)) = bounds v
             alt = allTerminals rules
             alnt = allNonTerminals rules
@@ -168,22 +166,29 @@ main = mainWidget initialContent $ \doc -> do
                     wrap (if i == i' && j==j' then "<td class='active'>" else "<td>") "</td>" $
                       intercalate "<br>" $ map showRule $ v ! (i,j)
         setInnerHTML tableel $ Just $ h ++ t
+      disableRun = postGUIAsync $ do
+        setAttribute runBtn "disabled" ""
+        removeAttribute stepBtn "disabled"
+      readGrammar = postGUISync $ T.getValue grammarel
+      readInput =  postGUISync $ I.getValue inputstrel
+      readSelectedParser = postGUISync $ S.getValue selectel
+      enableRun = postGUIAsync $ do
+        removeAttribute runBtn "disabled"
+        setAttribute stepBtn "disabled" ""
   canContinue <- newEmptyMVar
   canRun <- newMVar True
   void $ (stepBtn `on` click) $ liftIO $ void $ tryPutMVar canContinue ()
   void $ (runBtn `on` E.click) $ liftIO $ void $ forkIO $ do
     printError ""
-    postGUIAsync $ do
-      setAttribute runBtn "disabled" ""
-      removeAttribute stepBtn "disabled"
+    disableRun
     canRunVal <- tryTakeMVar canRun
     when (isJust canRunVal) $ do
       _ <- tryTakeMVar canContinue
-      Just grammar <- postGUISync $ T.getValue grammarel
+      Just grammar <- readGrammar
       case parser grammar of
-        Left err -> postGUIAsync $ printError $ show err
+        Left err -> printError $ show err
         Right rules -> do
-          Just inputstrText <- postGUISync $ I.getValue inputstrel
+          Just inputstrText <- readInput
           let inp = map Terminal $ words inputstrText
           if any (`S.notMember` allTerminals rules) inp
           then
@@ -195,10 +200,9 @@ main = mainWidget initialContent $ \doc -> do
                       alnt = allNonTerminals rules
                       run stl = do
                         (stack, input') <- get
-                        liftIO $ postGUIAsync $ do
-                          drawStack show stack
-                          drawInput input'
-                          updateLRTree stl
+                        drawStack show stack
+                        drawInput input'
+                        updateLRTree stl
                         if
                           | null stack && null input' -> return ()
                           | null stack -> liftIO (printError "empty stack")
@@ -211,14 +215,14 @@ main = mainWidget initialContent $ \doc -> do
                                         Terminal term -> (Node term [] :)
                                         Epsilon -> (Node "" [] :)
                                         Eof -> id
-                                liftIO $ postGUIAsync $ printLRTable rules (action, goto')
+                                printLRTable rules (action, goto')
                                   (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
                                   Nothing
                                 _ <- liftIO $ takeMVar canContinue
                                 run $ c stl
                               [LRReduce (np@(NonTerminal p), als)] -> do
                                 (_:ns:_, _) <- get
-                                liftIO $ postGUIAsync $ printLRTable rules (action, goto')
+                                printLRTable rules (action, goto')
                                   (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
                                   (Just (ns, S.findIndex np alnt))
                                 _ <- liftIO $ takeMVar canContinue
@@ -229,16 +233,15 @@ main = mainWidget initialContent $ \doc -> do
                                 return ()
                               [] -> printError "empty action"
                               _:_:_ ->  printError "ambiguous action"
-                  liftIO $ postGUIAsync $ printLRTable rules (action, goto') Nothing Nothing
+                  printLRTable rules (action, goto') Nothing Nothing
                   evalStateT (run []) ([startSt], inp ++ [Eof])
                 runLL = do
                   let tbl = makeLL1 rules
                       run stl = do
                         (stack, input') <- get
-                        liftIO $ postGUIAsync $ do
-                          drawStack showSym stack
-                          drawInput input'
-                          updateLLTree stl
+                        drawStack showSym stack
+                        drawInput input'
+                        updateLLTree stl
                         if
                           | null stack && null input' -> return ()
                           | null stack -> liftIO (printError "empty stack")
@@ -252,30 +255,28 @@ main = mainWidget initialContent $ \doc -> do
                                         Terminal term -> (Node term [] :)
                                         Epsilon -> (Node "" [] :)
                                         Eof -> id
-                                liftIO $ postGUIAsync $ printLLTable rules tbl (-1, -1)
+                                printLLTable rules tbl (-1, -1)
                                 _ <- liftIO $ takeMVar canContinue
                                 run $ stl . c
                               LL1Prod ix (NonTerminal p, als) -> do
-                                liftIO $ postGUIAsync $ printLLTable rules tbl ix
+                                printLLTable rules tbl ix
                                 _ <- liftIO $ takeMVar canContinue
                                 run $ stl . uncurry ((:) . Node p) . splitAt (length als)
                               LL1Prod ix (StartRule, _) -> do
-                                liftIO $ postGUIAsync $ printLLTable rules tbl ix
+                                printLLTable rules tbl ix
                                 _ <- liftIO $ takeMVar canContinue
                                 run stl
                               LL1Error err -> printError err
-                  liftIO $ postGUIAsync $ printLLTable rules tbl (-1, -1)
+                  printLLTable rules tbl (-1, -1)
                   evalStateT (run id) ([start], inp ++ [Eof])
 
-            Just act <- postGUISync $ S.getValue selectel
+            Just act <- readSelectedParser
             case act of
               "LL1" -> runLL
               "LR1" -> runLR makeLR1
               "SLR" -> runLR makeSLR
               x -> printError $ "Unknown: " ++ x
-      postGUIAsync $ do
-        removeAttribute runBtn "disabled"
-        setAttribute stepBtn "disabled" ""
+      enableRun
       void $ tryPutMVar canRun True
   where
     start = SNonTerminal StartRule
