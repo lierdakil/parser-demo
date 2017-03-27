@@ -6,4 +6,4 @@ This is not intended to be complete, useful for any particular application, or s
 
 Parser building code is in `src/`. It is intended to be readable, not efficient.
 
-[demo](https://github.com/lierdakil/parser-demo/blob/master/parser-demo.gif) (1.2 MB)
+[demo (gif animation)](https://github.com/lierdakil/parser-demo/blob/master/parser-demo.gif) (1.2 MB)
