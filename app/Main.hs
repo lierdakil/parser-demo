@@ -21,13 +21,11 @@ import LR
 import Control.Monad.State
 import qualified Data.Set as S
 import Data.Tree
-import Control.Concurrent.MVar
-import Control.Concurrent
 import Dia
 import Data.Maybe
-import Graphics.UI.Gtk (postGUIAsync, postGUISync)
 import Data.Array
 import Data.List
+import Data.IORef
 
 initialContent :: String
 initialContent = [s|
@@ -91,7 +89,8 @@ textarea {
 <option value="LR1">LR(1)</option>
 <option value="LALR">LALR</option>
 </select>
-<button id="step" disabled>Step</button>
+<button id="stepback" disabled>&lt;-</button>
+<button id="step" disabled>-&gt;</button>
 <button id="run">Run</button>
 <table id="input"></table>
 <table id="stack"></table>
@@ -142,6 +141,7 @@ wrap b e st = b ++ st ++ e
 main :: IO ()
 main = mainWidget initialContent $ \doc -> do
   stepBtn <- getElem doc "step"
+  stepbackBtn <- getElem doc "stepback"
   runBtn <- getElem doc "run"
   inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
   stackel <- castToHTMLElement <$> getElem doc "stack"
@@ -165,15 +165,15 @@ main = mainWidget initialContent $ \doc -> do
     let (initin', initgr') = samples !! n
     I.setValue inputstrel . Just $ initin'
     T.setValue grammarel $ Just initgr'
-  let drawStack how v = liftIO $ postGUIAsync $
+  let drawStack how v = liftIO $
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ how i++"</td></tr>") v
-      drawInput v = liftIO $ postGUIAsync $
+      drawInput v = liftIO $
         setInnerHTML inputel $ Just $ "<tr>" ++ concatMap (\i -> "<td>"++ showTerm i++"</td>") v ++ "</tr>"
-      updateLRTree v = liftIO $ postGUIAsync $
+      updateLRTree v = liftIO $
         setInnerHTML treeel $ Just $ drawSynForest $ reverse v
-      printError v = liftIO $ postGUIAsync $
+      printError v = liftIO $
         setInnerText errorel $ Just v
-      printLRTable rules (action, goto') stcs stnt =  liftIO $ postGUIAsync $ do
+      printLRTable rules (action, goto') stcs stnt =  liftIO $ do
         let ((imin, jmin), (imax, jmax)) = bounds action
             ((_, jmin'), (_, jmax')) = bounds goto'
             alt = allTerminals rules
@@ -194,9 +194,9 @@ main = mainWidget initialContent $ \doc -> do
             showAction (LRReduce x) = showRule x
             showAction LRAccept = "accept"
         setInnerHTML tableel $ Just $ h ++ t
-      updateLLTree v = liftIO $ postGUIAsync $
+      updateLLTree v = liftIO $
         setInnerHTML treeel $ Just $ drawSynTree $ head $ v $ repeat $ Node "?" []
-      printLLTable rules v (i', j') = liftIO $ postGUIAsync $ do
+      printLLTable rules v (i', j') = liftIO $ do
         let ((imin, jmin), (imax, jmax)) = bounds v
             alt = allTerminals rules
             alnt = allNonTerminals rules
@@ -206,118 +206,124 @@ main = mainWidget initialContent $ \doc -> do
                     wrap (if i == i' && j==j' then "<td class='active'>" else "<td>") "</td>" $
                       intercalate "<br>" $ map showRule $ v ! (i,j)
         setInnerHTML tableel $ Just $ h ++ t
-      disableRun = postGUIAsync $ do
-        setAttribute runBtn "disabled" ""
+      readGrammar = T.getValue grammarel
+      readInput =  I.getValue inputstrel
+      readSelectedParser = S.getValue selectel
+      enableStep =  do
         removeAttribute stepBtn "disabled"
-      readGrammar = postGUISync $ T.getValue grammarel
-      readInput =  postGUISync $ I.getValue inputstrel
-      readSelectedParser = postGUISync $ S.getValue selectel
-      enableRun = postGUIAsync $ do
-        removeAttribute runBtn "disabled"
-        setAttribute stepBtn "disabled" ""
-  canContinue <- newEmptyMVar
-  canRun <- newMVar True
-  void $ (stepBtn `on` click) $ liftIO $ void $ tryPutMVar canContinue ()
-  void $ (runBtn `on` E.click) $ liftIO $ void $ forkIO $ do
+        removeAttribute stepbackBtn "disabled"
+  results <- newIORef []
+  curstep <- newIORef 0
+  void $ (stepBtn `on` click) $ liftIO $ void $ do
+    xs <- readIORef results
+    st <- readIORef curstep
+    when (st + 1 < length xs) $ do
+      xs !! (st + 1)
+      writeIORef curstep (st + 1)
+  void $ (stepbackBtn `on` click) $ liftIO $ void $ do
+    xs <- readIORef results
+    st <- readIORef curstep
+    when (st > 0) $ do
+      xs !! (st - 1)
+      writeIORef curstep (st - 1)
+  void $ (runBtn `on` E.click) $ liftIO $ void $ do
     printError ""
-    disableRun
-    canRunVal <- tryTakeMVar canRun
-    when (isJust canRunVal) $ do
-      _ <- tryTakeMVar canContinue
-      Just grammar <- readGrammar
-      case parser grammar of
-        Left err -> printError $ show err
-        Right (rules, prio, assoc) -> do
-          Just inputstrText <- readInput
-          let inp = map Terminal $ words inputstrText
-          if any (`S.notMember` allTerminals rules) inp
-          then
-            printError "Unknown terminal"
-          else do
-            let runLR tbl = do
-                  let (startSt, action, goto') = tbl rules prio assoc
-                      alt = allTerminals rules
-                      alnt = allNonTerminals rules
-                      run stl = do
-                        (stack, input') <- get
-                        drawStack show stack
-                        drawInput input'
-                        updateLRTree stl
-                        printLRTable rules (action, goto')
-                          (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
-                          Nothing
-                        if
-                          | null stack && null input' -> return ()
-                          | null stack -> liftIO (printError "empty stack")
-                          | otherwise -> do
-                            sym' <- stepLR rules action goto'
-                            case sym' of
-                              [LRShift _] -> do
-                                let c =
-                                      case head input' of
-                                        Terminal term -> (Node term [] :)
-                                        Epsilon -> (Node "" [] :)
-                                        Eof -> id
-                                _ <- liftIO $ takeMVar canContinue
-                                run $ c stl
-                              [LRReduce (np@(NonTerminal p), als)] -> do
-                                (_:ns:_, _) <- get
-                                printLRTable rules (action, goto')
-                                  (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
-                                  (Just (ns, S.findIndex np alnt))
-                                _ <- liftIO $ takeMVar canContinue
-                                let (c, r) = splitAt (length als) stl
-                                run $ Node p (reverse c) : r
-                              [LRReduce (StartRule, _)] -> return ()
-                              [LRAccept] -> return ()
-                              [] -> printError "empty action"
-                              _:_:_ ->  printError "ambiguous action"
-                  printLRTable rules (action, goto') Nothing Nothing
-                  evalStateT (run []) ([startSt], inp ++ [Eof])
-                runLL = do
-                  let tbl = makeLL1 rules
-                      run stl = do
-                        (stack, input') <- get
-                        drawStack showSym stack
-                        drawInput input'
-                        updateLLTree stl
-                        if
-                          | null stack && null input' -> return ()
-                          | null stack -> liftIO (printError "empty stack")
-                          | null input' -> liftIO (printError "empty input")
-                          | otherwise -> do
-                            sym' <- stepLL1FA rules tbl
-                            case sym' of
-                              LL1Shift sym -> do
-                                let c =
-                                      case sym of
-                                        Terminal term -> (Node term [] :)
-                                        Epsilon -> (Node "" [] :)
-                                        Eof -> id
-                                printLLTable rules tbl (-1, -1)
-                                _ <- liftIO $ takeMVar canContinue
-                                run $ stl . c
-                              LL1Prod ix (NonTerminal p, als) -> do
-                                printLLTable rules tbl ix
-                                _ <- liftIO $ takeMVar canContinue
-                                run $ stl . uncurry ((:) . Node p) . splitAt (length als)
-                              LL1Prod ix (StartRule, _) -> do
-                                printLLTable rules tbl ix
-                                _ <- liftIO $ takeMVar canContinue
-                                run stl
-                              LL1Error err -> printError err
-                  printLLTable rules tbl (-1, -1)
-                  evalStateT (run id) ([start], inp ++ [Eof])
+    Just grammar <- readGrammar
+    case parser grammar of
+      Left err -> printError $ show err
+      Right (rules, prio, assoc) -> do
+        Just inputstrText <- readInput
+        let inp = map Terminal $ words inputstrText
+        if any (`S.notMember` allTerminals rules) inp
+        then
+          printError "Unknown terminal"
+        else do
+          let runLR tbl = do
+                let (startSt, action, goto') = tbl rules prio assoc
+                    alt = allTerminals rules
+                    alnt = allNonTerminals rules
+                    run stl acts = do
+                      (stack, input') <- get
+                      let doone :: IO ()
+                          doone = do
+                            drawStack show stack
+                            drawInput input'
+                            updateLRTree stl
+                            printLRTable rules (action, goto')
+                              (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
+                              Nothing
+                      if
+                        | null stack && null input' -> return (doone:acts)
+                        | null stack -> printError "empty stack" >> return (doone:acts)
+                        | otherwise -> do
+                          sym' <- stepLR rules action goto'
+                          case sym' of
+                            [LRShift _] -> do
+                              let c =
+                                    case head input' of
+                                      Terminal term -> (Node term [] :)
+                                      Epsilon -> (Node "" [] :)
+                                      Eof -> id
+                              run (c stl) (doone:acts)
+                            [LRReduce (np@(NonTerminal p), als)] -> do
+                              (_:ns:_, _) <- get
+                              let dotwo = do
+                                    doone
+                                    printLRTable rules (action, goto')
+                                      (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
+                                      (Just (ns, S.findIndex np alnt))
+                              let (c, r) = splitAt (length als) stl
+                              run (Node p (reverse c) : r) (dotwo:acts)
+                            [LRReduce (StartRule, _)] -> return (doone:acts)
+                            [LRAccept] -> return (doone:acts)
+                            [] -> printError "empty action" >> return (doone:acts)
+                            _:_:_ ->  printError "ambiguous action" >> return (doone:acts)
+                printLRTable rules (action, goto') Nothing Nothing
+                evalStateT (run [] []) ([startSt], inp ++ [Eof])
+              runLL = do
+                let tbl = makeLL1 rules
+                    run stl act = do
+                      (stack, input') <- get
+                      let doone :: IO ()
+                          doone = do
+                            drawStack showSym stack
+                            drawInput input'
+                            updateLLTree stl
+                      if
+                        | null stack && null input' -> return (doone:act)
+                        | null stack -> liftIO (printError "empty stack") >> return (doone:act)
+                        | null input' -> liftIO (printError "empty input") >> return (doone:act)
+                        | otherwise -> do
+                          sym' <- stepLL1FA rules tbl
+                          case sym' of
+                            LL1Shift sym -> do
+                              let c =
+                                    case sym of
+                                      Terminal term -> (Node term [] :)
+                                      Epsilon -> (Node "" [] :)
+                                      Eof -> id
+                              let dotwo = doone >> printLLTable rules tbl (-1, -1)
+                              run (stl . c) (dotwo:act)
+                            LL1Prod ix (NonTerminal p, als) -> do
+                              let dotwo = doone >> printLLTable rules tbl ix
+                              run (stl . uncurry ((:) . Node p) . splitAt (length als)) (dotwo:act)
+                            LL1Prod ix (StartRule, _) -> do
+                              let dotwo = doone >> printLLTable rules tbl ix
+                              run stl (dotwo:act)
+                            LL1Error err -> printError err >> return (doone:act)
+                printLLTable rules tbl (-1, -1)
+                evalStateT (run id []) ([start], inp ++ [Eof])
 
-            Just act <- readSelectedParser
-            case act of
-              "LL1" -> runLL
-              "LR1" -> runLR makeLR1
-              "LR0" -> runLR makeLR0
-              "SLR" -> runLR makeSLR
-              "LALR" -> runLR makeLALR
-              x -> printError $ "Unknown: " ++ x
-      enableRun
-      void $ tryPutMVar canRun True
+          Just act <- readSelectedParser
+          res <- case act of
+            "LL1" -> runLL
+            "LR1" -> runLR makeLR1
+            "LR0" -> runLR makeLR0
+            "SLR" -> runLR makeSLR
+            "LALR" -> runLR makeLALR
+            x -> printError ("Unknown: " ++ x) >> return []
+          writeIORef results $ reverse res
+          writeIORef curstep (-1)
+          enableStep
   where
     start = SNonTerminal StartRule
