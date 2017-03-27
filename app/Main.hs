@@ -242,6 +242,9 @@ main = mainWidget initialContent $ \doc -> do
                         drawStack show stack
                         drawInput input'
                         updateLRTree stl
+                        printLRTable rules (action, goto')
+                          (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
+                          Nothing
                         if
                           | null stack && null input' -> return ()
                           | null stack -> liftIO (printError "empty stack")
@@ -254,9 +257,6 @@ main = mainWidget initialContent $ \doc -> do
                                         Terminal term -> (Node term [] :)
                                         Epsilon -> (Node "" [] :)
                                         Eof -> id
-                                printLRTable rules (action, goto')
-                                  (Just (head stack, S.findIndex (head $ input' ++ repeat Eof) alt))
-                                  Nothing
                                 _ <- liftIO $ takeMVar canContinue
                                 run $ c stl
                               [LRReduce (np@(NonTerminal p), als)] -> do
@@ -267,9 +267,7 @@ main = mainWidget initialContent $ \doc -> do
                                 _ <- liftIO $ takeMVar canContinue
                                 let (c, r) = splitAt (length als) stl
                                 run $ Node p (reverse c) : r
-                              [LRReduce (StartRule, _)] -> do
-                                _ <- liftIO $ takeMVar canContinue
-                                return ()
+                              [LRReduce (StartRule, _)] -> return ()
                               [] -> printError "empty action"
                               _:_:_ ->  printError "ambiguous action"
                   printLRTable rules (action, goto') Nothing Nothing
