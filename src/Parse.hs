@@ -16,7 +16,7 @@ import Text.ParserCombinators.Parsec as P
 import Control.Monad
 
 data Terminal = Terminal String | Epsilon | Eof deriving (Eq, Ord, Show)
-data NonTerminal = NonTerminal String | StartRule deriving (Eq, Ord, Show)
+data NonTerminal = StartRule | NonTerminal String deriving (Eq, Ord, Show)
 data Symbol = STerminal Terminal | SNonTerminal NonTerminal deriving (Eq, Ord, Show)
 type Rule = (NonTerminal, [[Symbol]])
 type Rules = M.Map NonTerminal [[Symbol]]
