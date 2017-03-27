@@ -162,9 +162,9 @@ main = mainWidget initialContent $ \doc -> do
   T.setValue grammarel $ Just initgr
   void $ (sampleel `on` E.change) $ liftIO $ do
     n <- S.getSelectedIndex sampleel
-    let (initin, initgr) = samples !! n
-    I.setValue inputstrel . Just $ initin
-    T.setValue grammarel $ Just initgr
+    let (initin', initgr') = samples !! n
+    I.setValue inputstrel . Just $ initin'
+    T.setValue grammarel $ Just initgr'
   let drawStack how v = liftIO $ postGUIAsync $
         setInnerHTML stackel $ Just $ concatMap (\i -> "<tr><td>"++ how i++"</td></tr>") v
       drawInput v = liftIO $ postGUIAsync $
