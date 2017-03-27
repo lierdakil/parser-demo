@@ -126,6 +126,14 @@ T -> F T'
 T' -> "*" F T' |
 F -> "(" E ")" | id
 |]
+  , (,) "id + id - id + id" [s|E -> E "^" E | E "*" E | E "/" E | E "+" E | E "-" E | "(" E ")" | id
+
+"^"
+"*" "/"
+"+" "-"
+
+"^" Right
+|]
   ]
 
 wrap :: [a] -> [a] -> [a] -> [a]
@@ -218,7 +226,7 @@ main = mainWidget initialContent $ \doc -> do
       Just grammar <- readGrammar
       case parser grammar of
         Left err -> printError $ show err
-        Right rules -> do
+        Right (rules, prio, assoc) -> do
           Just inputstrText <- readInput
           let inp = map Terminal $ words inputstrText
           if any (`S.notMember` allTerminals rules) inp
@@ -226,7 +234,7 @@ main = mainWidget initialContent $ \doc -> do
             printError "Unknown terminal"
           else do
             let runLR tbl = do
-                  let (startSt, action, goto') = tbl rules--makeSLR rules
+                  let (startSt, action, goto') = tbl rules prio assoc
                       alt = allTerminals rules
                       alnt = allNonTerminals rules
                       run stl = do

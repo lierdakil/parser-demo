@@ -9,6 +9,7 @@ import Control.Monad.State
 
 import Parse
 import LL
+import Data.List
 
 data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) deriving (Eq, Ord, Show)
 type LRActionTable = Array (Int, Int) [LRAction]
@@ -68,15 +69,36 @@ states rules cl = (S.findIndex start res, res)
       newAcc = S.insert st $ newSt `S.union` acc
       next = S.unions $ map (go newAcc) $ S.toList newSt
 
-makeLR :: (Rules -> S.Set Point -> S.Set Point) -> (S.Set Point -> Terminal -> Point -> Bool) -> Rules -> (Int, LRActionTable, LRGotoTable)
-makeLR cl fol rules = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ range bs, array bs2 $ map (ap (,) goto') $ range bs2)
+-- makeLR :: (Rules -> S.Set Point -> S.Set Point) -> (S.Set Point -> Terminal -> Point -> Bool) -> Rules -> (Int, LRActionTable, LRGotoTable)
+makeLR :: (Rules -> S.Set Point -> S.Set Point) -> (S.Set Point -> Terminal -> Point -> Bool) -> Rules -> Precedence -> Associativity -> (Int, LRActionTable, LRGotoTable)
+makeLR cl fol rules priorities assoc = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ range bs, array bs2 $ map (ap (,) goto') $ range bs2)
   where
     (startSt, stl) = states rules cl
     at = allTerminals rules
     ant = allNonTerminals rules
     bs = ((0, 0), (S.size stl - 1, S.size at - 1))
     bs2 = ((0, 0), (S.size stl - 1, S.size ant - 1))
-    action x = action1 x ++ action2 x
+    action x =
+      case action1 x ++ action2 x of
+        y@[LRShift st, LRReduce (h, b)]
+          | Just (STerminal lastTerm) <- find findTerm $ reverse b
+          , Just shiftPrio <- findIndex (term `S.member`) priorities
+          , Just reducePrio <- findIndex (lastTerm `S.member`) priorities
+          -> let shiftAssoc = fromMaybe LeftAssoc $ M.lookup term assoc
+                 reduceAssoc = fromMaybe LeftAssoc $ M.lookup lastTerm assoc
+             in if
+                | shiftPrio < reducePrio -> [LRShift st]
+                | shiftPrio > reducePrio -> [LRReduce (h, b)]
+                | shiftPrio == reducePrio && shiftAssoc == reduceAssoc ->
+                  case shiftAssoc of
+                    LeftAssoc -> [LRReduce (h, b)]
+                    RightAssoc -> [LRShift st]
+                | otherwise -> y
+        z -> z
+        where
+          findTerm (STerminal _) = True
+          findTerm _ = False
+          term = S.elemAt (snd x) at
     action1 (st, term)
       | gt <- goto rules cl curst (STerminal curterm)
       , not $ S.null gt
@@ -102,16 +124,14 @@ makeLR cl fol rules = (startSt, accumArray (++) [] bs $ map (ap (,) action) $ ra
         curst = S.elemAt st stl
         cursym = S.elemAt nt ant
 
-makeLR0 :: Rules -> (Int, LRActionTable, LRGotoTable)
+-- makeLR0 :: Rules -> (Int, LRActionTable, LRGotoTable)
+makeLR0, makeSLR, makeLR1, makeLALR :: Rules -> Precedence -> Associativity -> (Int, LRActionTable, LRGotoTable)
 makeLR0 = makeLR closure (\_ _ _ -> True)
 
-makeSLR :: Rules -> (Int, LRActionTable, LRGotoTable)
 makeSLR rules = makeLR closure (\_ curterm p -> curterm `S.member` follow rules (pHead p)) rules
 
-makeLR1 :: Rules -> (Int, LRActionTable, LRGotoTable)
 makeLR1 = makeLR closure1 (\_ curterm p -> curterm `S.member` pLookahead p)
 
-makeLALR :: Rules -> (Int, LRActionTable, LRGotoTable)
 makeLALR rules = makeLR closure (\curst curterm p -> curterm `S.member` getLookahead curst p) rules
   where
     getLookahead curst0 p = S.unions $ S.toList $ S.map pLookahead $ S.filter (\p1 -> stripLA p == stripLA p1) curst1
@@ -134,10 +154,10 @@ stepLR rules action gotot = do
   a <- peek
   x <- peekstack
   case action ! (x, termIx a) of
-    [LRShift n] -> do
+    LRShift n : _ -> do
       push [n]
       shift
-    [LRReduce (nt, b)] -> do
+    LRReduce (nt, b) : _ -> do
       popn $ length b
       t <- peekstack
       when (nt /= StartRule) $ do
