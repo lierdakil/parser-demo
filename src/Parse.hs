@@ -27,7 +27,6 @@ type Associativity = M.Map Terminal Assoc
 
 parser :: String -> Either ParseError (Rules, Precedence, Associativity)
 parser = parse ((,,) <$> (rules <* spaces) <*> (precedence <* spaces) <*> (associativity <* spaces) <* eof ) "input"
-  -- where
 
 rules :: Parser Rules
 rules = M.fromListWith (++) . addStart <$> manyTill (rule <* optional newline) (void newline <|> eof)
@@ -61,7 +60,7 @@ precedence :: Parser Precedence
 precedence = manyTill (S.fromList <$> terminal `sepBy1` spaces' <* optional newline) (void newline <|> eof)
 
 associativity :: Parser Associativity
-associativity = M.fromList . concat <$> manyTill (( flip (map . flip (,)) <$> many1 (terminal <* spaces') <*> assoc) <* optional newline) (void newline <|> eof)
+associativity = M.fromList . concat <$> manyTill (( map . flip (,) <$> assoc <*> many1 terminal) <* optional newline) (void newline <|> eof)
 
 assoc :: Parser Assoc
-assoc = (RightAssoc <$ string "Right") <|> (LeftAssoc <$ string "Left")
+assoc = ((RightAssoc <$ string "Right") <|> (LeftAssoc <$ string "Left")) <* spaces'
