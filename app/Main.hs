@@ -108,15 +108,7 @@ textarea {
 
 samples :: [(String, String)]
 samples = [
-    (,) "id = * id" [s|S -> L "=" R | R
-L -> "*" R | id
-R -> L
-|]
-  , (,) "b c d" [s|S -> a A d | b B d | a B e | b A e
-A -> c
-B -> c
-|]
-  , (,) "id + ( id + id ) * id" [s|E -> E "+" T | T
+    (,) "id + ( id + id ) * id" [s|E -> E "+" T | T
 T -> T "*" F | F
 F -> "(" E ")" | id
 |]
@@ -125,6 +117,14 @@ E' -> "+" T E' |
 T -> F T'
 T' -> "*" F T' |
 F -> "(" E ")" | id
+|]
+  , (,) "id = * id" [s|S -> L "=" R | R
+L -> "*" R | id
+R -> L
+|]
+  , (,) "b c d" [s|S -> a A d | b B d | a B e | b A e
+A -> c
+B -> c
 |]
   , (,) "id + id - id + id" [s|E -> E "^" E | E "*" E | E "/" E | E "+" E | E "-" E | "(" E ")" | id
 
