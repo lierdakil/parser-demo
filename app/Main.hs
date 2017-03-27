@@ -6,6 +6,7 @@ module Main where
 import Graphics.UI.Gtk.WebKit.DOM.Document as D hiding (click)
 import Graphics.UI.Gtk.WebKit.DOM.Element as E
 import Graphics.UI.Gtk.WebKit.DOM.Node as N
+import Graphics.UI.Gtk.WebKit.DOM.KeyboardEvent
 import Graphics.UI.Gtk.WebKit.DOM.HTMLInputElement as I
 import Graphics.UI.Gtk.WebKit.DOM.HTMLTextAreaElement as T
 import Graphics.UI.Gtk.WebKit.DOM.HTMLSelectElement as S
@@ -214,18 +215,26 @@ main = mainWidget initialContent $ \doc -> do
         removeAttribute stepbackBtn "disabled"
   results <- newIORef []
   curstep <- newIORef 0
-  void $ (stepBtn `on` click) $ liftIO $ void $ do
-    xs <- readIORef results
-    st <- readIORef curstep
-    when (st + 1 < length xs) $ do
-      xs !! (st + 1)
-      writeIORef curstep (st + 1)
-  void $ (stepbackBtn `on` click) $ liftIO $ void $ do
-    xs <- readIORef results
-    st <- readIORef curstep
-    when (st > 0) $ do
-      xs !! (st - 1)
-      writeIORef curstep (st - 1)
+  let goForwards = do
+        xs <- readIORef results
+        st <- readIORef curstep
+        when (st + 1 < length xs) $ do
+          xs !! (st + 1)
+          writeIORef curstep (st + 1)
+      goBackwards = do
+        xs <- readIORef results
+        st <- readIORef curstep
+        when (st > 0) $ do
+          xs !! (st - 1)
+          writeIORef curstep (st - 1)
+  void $ (doc `on` D.keyDown) $ do
+    key <- getKeyIdentifier =<< ask
+    case key of
+      "Right" -> liftIO goForwards
+      "Left" -> liftIO goBackwards
+      _ -> return ()
+  void $ (stepBtn `on` click) $ liftIO goForwards
+  void $ (stepbackBtn `on` click) $ liftIO goBackwards
   void $ (runBtn `on` E.click) $ liftIO $ void $ do
     ?printError ""
     Just grammar <- readGrammar
