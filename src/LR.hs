@@ -11,7 +11,7 @@ import Parse
 import LL
 import Data.List
 
-data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) deriving (Eq, Ord, Show)
+data LRAction = LRShift Int | LRReduce (NonTerminal, [Symbol]) | LRAccept deriving (Eq, Ord, Show)
 type LRActionTable = Array (Int, Int) [LRAction]
 type LRGotoTable = Array (Int, Int) (Maybe Int)
 data Point = Point { pHead :: NonTerminal, pPos :: Int, pLookahead :: S.Set Terminal, pBody :: [Symbol] } deriving (Eq, Ord, Show)
@@ -94,6 +94,7 @@ makeLR cl fol rules priorities assoc = (startSt, accumArray (++) [] bs $ map (ap
                     LeftAssoc -> [LRReduce (h, b)]
                     RightAssoc -> [LRShift st]
                 | otherwise -> y
+        [LRReduce (StartRule, _)] -> [LRAccept]
         z -> z
         where
           findTerm (STerminal _) = True

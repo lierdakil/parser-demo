@@ -192,6 +192,7 @@ main = mainWidget initialContent $ \doc -> do
                     [jmin'..jmax']
             showAction (LRShift n) = show n
             showAction (LRReduce x) = showRule x
+            showAction LRAccept = "accept"
         setInnerHTML tableel $ Just $ h ++ t
       updateLLTree v = liftIO $ postGUIAsync $
         setInnerHTML treeel $ Just $ drawSynTree $ head $ v $ repeat $ Node "?" []
@@ -268,6 +269,7 @@ main = mainWidget initialContent $ \doc -> do
                                 let (c, r) = splitAt (length als) stl
                                 run $ Node p (reverse c) : r
                               [LRReduce (StartRule, _)] -> return ()
+                              [LRAccept] -> return ()
                               [] -> printError "empty action"
                               _:_:_ ->  printError "ambiguous action"
                   printLRTable rules (action, goto') Nothing Nothing
