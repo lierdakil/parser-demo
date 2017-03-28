@@ -235,7 +235,6 @@ main = mainWidget initialContent $ \doc -> do
           writeIORef curstep (st - 1)
   void $ (doc `on` D.keyDown) $ do
     key <- getKey =<< ask
-    liftIO $ ?printError key
     case key of
       "ArrowRight" -> liftIO goForwards
       "ArrowLeft" -> liftIO goBackwards
