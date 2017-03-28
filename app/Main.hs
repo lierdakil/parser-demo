@@ -3,18 +3,19 @@
 
 module Main where
 
-import Graphics.UI.Gtk.WebKit.DOM.Document as D hiding (click)
-import Graphics.UI.Gtk.WebKit.DOM.Element as E
-import Graphics.UI.Gtk.WebKit.DOM.Node as N
-import Graphics.UI.Gtk.WebKit.DOM.KeyboardEvent
-import Graphics.UI.Gtk.WebKit.DOM.HTMLInputElement as I
-import Graphics.UI.Gtk.WebKit.DOM.HTMLTextAreaElement as T
-import Graphics.UI.Gtk.WebKit.DOM.HTMLSelectElement as S
-import Graphics.UI.Gtk.WebKit.DOM.HTMLOptionElement as O
-import Graphics.UI.Gtk.WebKit.DOM.HTMLElement as H hiding (click)
+import GHCJS.DOM.Document as D hiding (click)
+import GHCJS.DOM.Element as E
+import qualified GHCJS.DOM.Node as N
+import GHCJS.DOM.KeyboardEvent
+import GHCJS.DOM.HTMLInputElement as I
+import GHCJS.DOM.HTMLTextAreaElement as T
+import GHCJS.DOM.HTMLSelectElement as S
+import GHCJS.DOM.HTMLOptionElement as O
+import GHCJS.DOM.HTMLElement as H hiding (click)
 import QQ
 import Control.Monad.Reader
-import Graphics.UI.Gtk.WebKit.DOM.EventM
+import GHCJS.DOM.EventM
+import GHCJS.DOM.Types hiding (Node)
 
 
 import Boilerplate
@@ -137,6 +138,10 @@ Right "^"
 |]
   ]
 
+foreign import javascript unsafe "$1[\"key\"]"
+        js_getKey :: KeyboardEvent -> IO JSString
+getKey self = liftIO (fromJSString <$> (js_getKey (self)))
+
 wrap :: [a] -> [a] -> [a] -> [a]
 wrap b e st = b ++ st ++ e
 
@@ -144,20 +149,21 @@ main = mainWidget initialContent $ \doc -> do
   stepBtn <- getElem doc "step"
   stepbackBtn <- getElem doc "stepback"
   runBtn <- getElem doc "run"
-  inputstrel <- castToHTMLInputElement <$> getElem doc "inputstr"
-  stackel <- castToHTMLElement <$> getElem doc "stack"
-  inputel <- castToHTMLElement <$> getElem doc "input"
-  grammarel <- castToHTMLTextAreaElement <$> getElem doc "grammar"
+  inputstrel <- unsafeCastTo HTMLInputElement =<< getElem doc "inputstr"
+  stackel <- unsafeCastTo HTMLElement =<< getElem doc "stack"
+  inputel <- unsafeCastTo HTMLElement =<< getElem doc "input"
+  grammarel <- unsafeCastTo HTMLTextAreaElement =<< getElem doc "grammar"
   treeel <- getElem doc "tree"
   tableel <- getElem doc "table"
-  errorel <- castToHTMLElement <$> getElem doc "error"
-  selectel <- castToHTMLSelectElement <$> getElem doc "select"
-  sampleel <- castToHTMLSelectElement <$> getElem doc "sample"
+  errorel <- unsafeCastTo HTMLElement =<< getElem doc "error"
+  selectel <- unsafeCastTo HTMLSelectElement =<< getElem doc "select"
+  sampleel <- unsafeCastTo HTMLSelectElement =<< getElem doc "sample"
   forM_ [0 .. length samples - 1] $ \i -> do
-    Just opt <- fmap castToHTMLOptionElement <$> D.createElement doc (Just "option")
+    Just el <- D.createElement doc (Just "option")
+    opt <- unsafeCastTo HTMLOptionElement el
     H.setInnerText opt (Just $ "Example " ++ show i)
     O.setValue opt $ show i
-    appendChild sampleel (Just opt)
+    N.appendChild sampleel (Just opt)
   let (initin, initgr) = head samples
   I.setValue inputstrel . Just $ initin
   T.setValue grammarel $ Just initgr
@@ -228,10 +234,11 @@ main = mainWidget initialContent $ \doc -> do
           xs !! (st - 1)
           writeIORef curstep (st - 1)
   void $ (doc `on` D.keyDown) $ do
-    key <- getKeyIdentifier =<< ask
+    key <- getKey =<< ask
+    liftIO $ ?printError key
     case key of
-      "Right" -> liftIO goForwards
-      "Left" -> liftIO goBackwards
+      "ArrowRight" -> liftIO goForwards
+      "ArrowLeft" -> liftIO goBackwards
       _ -> return ()
   void $ (stepBtn `on` click) $ liftIO goForwards
   void $ (stepbackBtn `on` click) $ liftIO goBackwards
