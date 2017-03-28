@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+  <head>
+<style>
+#tree svg {
+  float: right;
+  max-height: 100vh;
+  max-width: 40vw;
+}
+#stack {
+  float: left;
+}
+table {
+  border: 1px solid;
+  border-spacing: 0;
+  min-width: 1em;
+  min-height: 1em;
+}
+table td {
+  border: 1px solid;
+  white-space: pre;
+  text-align: center;
+  padding: 0.5ex;
+}
+#table {
+  margin-left: 3em;
+  margin-top: 2em;
+}
+textarea {
+  margin-left: 3em;
+  display: block;
+}
+#sample {
+  display: block;
+  margin-top: 2em;
+  margin-left: 3em;
+}
+#input {
+  margin-left: 3em;
+}
+#stack {
+  margin-top: 2em;
+}
+#table td.active {
+  background: green;
+}
+</style>
+  </head>
+  <body>
+<div id="tree"></div>
+<input type="text" id="inputstr">
+<select id="select">
+<option selected value="LL1">LL(1)</option>
+<option value="LR0">LR(0)</option>
+<option value="SLR">SLR</option>
+<option value="LR1">LR(1)</option>
+<option value="LALR">LALR</option>
+</select>
+<button id="stepback" disabled>&lt;-</button>
+<button id="step" disabled>-&gt;</button>
+<button id="run">Run</button>
+<table id="input"></table>
+<table id="stack"></table>
+<table id="table">
+</table>
+<div id="error">
+</div>
+<select id="sample"></select>
+<textarea id="grammar" cols="40" rows="10"></textarea>
+  </body>
+  <script language="javascript" src="all.js" defer></script>
+</html>
